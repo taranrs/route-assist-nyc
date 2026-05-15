@@ -61,6 +61,75 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(ranked[PreferenceMode.cheapest].option.id, "cheap")
         self.assertEqual(ranked[PreferenceMode.least_stressful].option.id, "calm")
 
+    def test_fastest_route_selection_uses_time_and_wait(self):
+        faster_with_wait = make_route(id="short-wait-heavy", travel_time_minutes=10, wait_time_minutes=10)
+        steadier = make_route(id="steady", travel_time_minutes=13, wait_time_minutes=0)
+
+        ranked = select_ranked_routes(score_routes([faster_with_wait, steadier]))
+
+        self.assertEqual(ranked[PreferenceMode.fastest].option.id, "steady")
+
+    def test_cheapest_route_selection_uses_cost_and_transfer_penalty(self):
+        free_with_many_transfers = make_route(id="free", estimated_cost=0, transfers=3)
+        low_cost_direct = make_route(id="direct", estimated_cost=0.5, transfers=0)
+
+        ranked = select_ranked_routes(score_routes([free_with_many_transfers, low_cost_direct]))
+
+        self.assertEqual(ranked[PreferenceMode.cheapest].option.id, "direct")
+
+    def test_safety_aware_route_selection_prioritizes_low_exposure(self):
+        fast = make_route(
+            id="fast",
+            travel_time_minutes=8,
+            estimated_cost=45,
+            walking_minutes=15,
+            wait_time_minutes=0,
+            congestion_score=9,
+            weather_penalty=5,
+            late_night_walk_penalty=10,
+            service_alert_penalty=5,
+        )
+        cheap = make_route(id="cheap", mode=RouteMode.walking, travel_time_minutes=50, estimated_cost=0, walking_minutes=50, transfers=0)
+        calm = make_route(
+            id="calm",
+            travel_time_minutes=10,
+            estimated_cost=3,
+            walking_minutes=2,
+            transfers=0,
+            wait_time_minutes=0,
+            congestion_score=0,
+            weather_penalty=5,
+            late_night_walk_penalty=5,
+            service_alert_penalty=0,
+        )
+        safe = make_route(
+            id="safe",
+            travel_time_minutes=27,
+            estimated_cost=8,
+            walking_minutes=0,
+            transfers=0,
+            wait_time_minutes=0,
+            congestion_score=0,
+            weather_penalty=0,
+            late_night_walk_penalty=0,
+            service_alert_penalty=0,
+        )
+
+        ranked = select_ranked_routes(score_routes([fast, cheap, calm, safe]))
+
+        self.assertEqual(ranked[PreferenceMode.fastest].option.id, "fast")
+        self.assertEqual(ranked[PreferenceMode.cheapest].option.id, "cheap")
+        self.assertEqual(ranked[PreferenceMode.least_stressful].option.id, "calm")
+        self.assertEqual(ranked[PreferenceMode.safety_aware].option.id, "safe")
+
+    def test_late_night_mode_increases_stress_penalty(self):
+        route = make_route(late_night_walk_penalty=8)
+
+        normal_score = calculate_stress_score(route)
+        late_night_score = calculate_stress_score(route, late_night_mode=True)
+
+        self.assertGreater(late_night_score, normal_score)
+
 
 if __name__ == "__main__":
     unittest.main()

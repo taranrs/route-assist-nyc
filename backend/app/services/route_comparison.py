@@ -2,7 +2,7 @@ from app.domain.enums import PreferenceMode, RouteMode
 from app.models.routes import CompareRoutesRequest, CompareRoutesResponse, RouteCard
 from app.providers.mock_routes import get_mock_route_options
 from app.services.scope import SUPPORTED_SCOPE_MESSAGE, is_supported_manhattan_route
-from app.services.scoring import ScoredRoute, score_routes, select_ranked_routes
+from app.services.scoring import RouteOption, ScoredRoute, score_routes, select_ranked_routes
 
 LABELS = {
     PreferenceMode.fastest: "Fastest",
@@ -21,13 +21,7 @@ def compare_routes(request: CompareRoutesRequest) -> CompareRoutesResponse:
             routeCards=[],
         )
 
-    options = get_mock_route_options(request.origin, request.destination)
-    if request.max_rideshare_cost is not None:
-        options = [
-            option
-            for option in options
-            if option.mode != RouteMode.rideshare or option.estimated_cost <= request.max_rideshare_cost
-        ]
+    options = _apply_request_filters(get_mock_route_options(request.origin, request.destination), request)
 
     scored = score_routes(
         options,
@@ -59,6 +53,20 @@ def compare_routes(request: CompareRoutesRequest) -> CompareRoutesResponse:
         requestedPreference=request.preference_mode,
         routeCards=cards,
     )
+
+
+def _apply_request_filters(
+    options: list[RouteOption],
+    request: CompareRoutesRequest,
+) -> list[RouteOption]:
+    if request.max_rideshare_cost is None:
+        return options
+
+    return [
+        option
+        for option in options
+        if option.mode != RouteMode.rideshare or option.estimated_cost <= request.max_rideshare_cost
+    ]
 
 
 def _to_route_card(

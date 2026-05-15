@@ -1,28 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { Bike, Car, Footprints, TrainFront, Umbrella, Moon, ArrowRight } from "lucide-react";
+import { compareRoutesRequest } from "./api";
 import "./styles.css";
-
-type PreferenceMode = "fastest" | "cheapest" | "least_stressful" | "safety_aware";
-type RouteMode = "subway" | "walking" | "citi_bike" | "rideshare";
-
-type RouteCard = {
-  label: string;
-  mode: RouteMode;
-  estimatedTime: number;
-  estimatedCost: number;
-  transfers: number;
-  walkingMinutes: number;
-  stressScore: number;
-  reasons: string[];
-};
-
-type CompareResponse = {
-  supported: boolean;
-  scopeMessage: string | null;
-  requestedPreference: PreferenceMode;
-  routeCards: RouteCard[];
-};
+import type { CompareRoutesRequest, CompareRoutesResponse, PreferenceMode, RouteCard, RouteMode } from "./types";
 
 const examples = [
   ["Penn Station", "Washington Square Park"],
@@ -56,7 +37,7 @@ function App() {
   const [lateNightMode, setLateNightMode] = React.useState(false);
   const [badWeatherMode, setBadWeatherMode] = React.useState(false);
   const [maxRideshareCost, setMaxRideshareCost] = React.useState("35");
-  const [data, setData] = React.useState<CompareResponse | null>(null);
+  const [data, setData] = React.useState<CompareRoutesResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
 
@@ -66,27 +47,19 @@ function App() {
     setError("");
 
     try {
-      const response = await fetch("/api/routes/compare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          origin,
-          destination,
-          departure_time: departureTime,
-          preference_mode: preferenceMode,
-          avoid_long_walks: avoidLongWalks,
-          avoid_transfers: avoidTransfers,
-          late_night_mode: lateNightMode,
-          bad_weather_mode: badWeatherMode,
-          max_rideshare_cost: maxRideshareCost ? Number(maxRideshareCost) : null
-        })
-      });
+      const payload: CompareRoutesRequest = {
+        origin,
+        destination,
+        departure_time: departureTime,
+        preference_mode: preferenceMode,
+        avoid_long_walks: avoidLongWalks,
+        avoid_transfers: avoidTransfers,
+        late_night_mode: lateNightMode,
+        bad_weather_mode: badWeatherMode,
+        max_rideshare_cost: maxRideshareCost ? Number(maxRideshareCost) : null
+      };
 
-      if (!response.ok) {
-        throw new Error("Route comparison failed.");
-      }
-
-      setData(await response.json());
+      setData(await compareRoutesRequest(payload));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong.");
     } finally {
@@ -166,8 +139,14 @@ function App() {
       <section className="mx-auto max-w-7xl px-5 py-8">
         {error && <div className="rounded-lg border border-red-800 bg-red-950/50 p-4 text-red-100">{error}</div>}
         {data?.scopeMessage && <div className="rounded-lg border border-amber-700 bg-amber-950/50 p-4 text-amber-100">{data.scopeMessage}</div>}
-        {loading && <div className="text-zinc-400">Comparing route options...</div>}
-        {!loading && data?.supported && (
+        {loading && <DashboardState title="Comparing route options..." body="Scoring mocked Manhattan choices by time, cost, walking, transfers, weather, congestion, and stress." />}
+        {!loading && !error && data?.supported && data.routeCards.length === 0 && (
+          <DashboardState title="No route cards available" body="Try one of the Manhattan example routes above." />
+        )}
+        {!loading && !error && !data && (
+          <DashboardState title="Ready to compare" body="Enter a Manhattan origin and destination to see ranked route cards." />
+        )}
+        {!loading && data?.supported && data.routeCards.length > 0 && (
           <div className="grid gap-4 lg:grid-cols-4">
             {data.routeCards.map((route) => (
               <RouteCardView key={route.label} route={route} highlighted={route.label === preferenceLabels[data.requestedPreference]} />
@@ -176,6 +155,15 @@ function App() {
         )}
       </section>
     </main>
+  );
+}
+
+function DashboardState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-6">
+      <p className="font-semibold text-zinc-100">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-zinc-400">{body}</p>
+    </div>
   );
 }
 

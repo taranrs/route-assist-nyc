@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Callable
 
 from app.domain.enums import PreferenceMode, RouteMode
 
@@ -26,6 +27,16 @@ class ScoredRoute:
     cheapest_score: float
     stress_score: float
     safety_score: float
+
+
+Selector = Callable[[ScoredRoute], float]
+
+RANKING_SELECTORS: dict[PreferenceMode, Selector] = {
+    PreferenceMode.fastest: lambda route: route.fastest_score,
+    PreferenceMode.cheapest: lambda route: route.cheapest_score,
+    PreferenceMode.least_stressful: lambda route: route.stress_score,
+    PreferenceMode.safety_aware: lambda route: route.safety_score,
+}
 
 
 def calculate_stress_score(
@@ -128,9 +139,10 @@ def score_routes(
 
 
 def select_ranked_routes(scored_routes: list[ScoredRoute]) -> dict[PreferenceMode, ScoredRoute]:
+    if not scored_routes:
+        raise ValueError("Cannot rank an empty route list.")
+
     return {
-        PreferenceMode.fastest: min(scored_routes, key=lambda route: route.fastest_score),
-        PreferenceMode.cheapest: min(scored_routes, key=lambda route: route.cheapest_score),
-        PreferenceMode.least_stressful: min(scored_routes, key=lambda route: route.stress_score),
-        PreferenceMode.safety_aware: min(scored_routes, key=lambda route: route.safety_score),
+        preference: min(scored_routes, key=lambda route: (selector(route), route.option.id))
+        for preference, selector in RANKING_SELECTORS.items()
     }
