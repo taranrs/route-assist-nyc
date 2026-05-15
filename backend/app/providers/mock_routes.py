@@ -1,5 +1,7 @@
+from math import asin, cos, radians, sin, sqrt
+
 from app.domain.enums import RouteMode
-from app.services.location_catalog import canonical_location_name
+from app.services.location_catalog import canonical_location_name, resolve_demo_location
 from app.services.scoring import RouteOption
 
 
@@ -52,9 +54,112 @@ def get_mock_route_options(origin: str, destination: str) -> list[RouteOption]:
     if reverse_key in MOCK_ROUTE_LIBRARY:
         return MOCK_ROUTE_LIBRARY[reverse_key]
 
+    return generate_generic_manhattan_options(origin, destination)
+
+
+def generate_generic_manhattan_options(origin: str, destination: str) -> list[RouteOption]:
+    origin_location = resolve_demo_location(origin)
+    destination_location = resolve_demo_location(destination)
+    if origin_location is None or destination_location is None:
+        return []
+
+    distance = max(
+        0.3,
+        _haversine_miles(
+            origin_location.latitude,
+            origin_location.longitude,
+            destination_location.latitude,
+            destination_location.longitude,
+        ),
+    )
+    complexity = _route_complexity(distance)
+    walking_time = round(distance * 20)
+    bike_time = round(distance * 10 + 7)
+    subway_wait = 4 + complexity
+    subway_transfers = 0 if distance < 2.0 else 1 if distance < 5.0 else 2
+    subway_time = round(8 + distance * 5.4 + subway_wait + subway_transfers * 5)
+    congestion = min(10, round(3 + distance * 1.15 + complexity))
+    rideshare_time = round(7 + distance * 7.0 + congestion * 0.8)
+    rideshare_cost = round(11 + distance * 5.6 + congestion * 1.35, 2)
+    bike_cost = round(min(8.0, 4.0 + distance * 0.55), 2)
+
     return [
-        RouteOption("subway-generic", RouteMode.subway, 24, 2.90, 8, 1, 5, 4, 3, 3, 1, "Mock subway route using nearby Manhattan stations"),
-        RouteOption("walk-generic", RouteMode.walking, 42, 0, 42, 0, 0, 1, 5, 7, 0, "Direct Manhattan walking route"),
-        RouteOption("bike-generic", RouteMode.citi_bike, 22, 4.79, 6, 0, 3, 5, 7, 4, 0, "Mock Citi Bike route between nearby docks"),
-        RouteOption("ride-generic", RouteMode.rideshare, 25, 28.00, 3, 0, 5, 7, 1, 1, 0, "Mock rideshare route with Manhattan congestion"),
+        RouteOption(
+            "subway-generic",
+            RouteMode.subway,
+            subway_time,
+            2.90,
+            min(14, 5 + subway_transfers * 3),
+            subway_transfers,
+            subway_wait,
+            max(2, complexity),
+            2,
+            2 + subway_transfers,
+            subway_transfers,
+            "Demo subway estimate using nearby Manhattan stations.",
+            round(distance, 2),
+        ),
+        RouteOption(
+            "walk-generic",
+            RouteMode.walking,
+            max(7, walking_time),
+            0,
+            max(7, walking_time),
+            0,
+            0,
+            1,
+            min(10, max(2, round(distance * 1.8))),
+            min(10, max(2, round(distance * 2.4))),
+            0,
+            "Demo walking estimate based on approximate Manhattan distance.",
+            round(distance, 2),
+        ),
+        RouteOption(
+            "bike-generic",
+            RouteMode.citi_bike,
+            max(9, bike_time),
+            bike_cost,
+            6,
+            0,
+            3,
+            min(8, max(2, round(distance * 1.2))),
+            min(10, max(3, round(distance * 1.7))),
+            min(10, max(3, round(distance * 1.5))),
+            0,
+            "Demo Citi Bike estimate with unlock, dock, and short walk time.",
+            round(distance, 2),
+        ),
+        RouteOption(
+            "ride-generic",
+            RouteMode.rideshare,
+            max(9, rideshare_time),
+            rideshare_cost,
+            3,
+            0,
+            4,
+            congestion,
+            1,
+            1,
+            0,
+            "Demo rideshare estimate with Manhattan congestion.",
+            round(distance, 2),
+        ),
     ]
+
+
+def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius_miles = 3958.8
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    lat1_rad = radians(lat1)
+    lat2_rad = radians(lat2)
+    a = sin(dlat / 2) ** 2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2) ** 2
+    return 2 * radius_miles * asin(sqrt(a))
+
+
+def _route_complexity(distance_miles: float) -> int:
+    if distance_miles < 1.5:
+        return 1
+    if distance_miles < 4.0:
+        return 2
+    return 3

@@ -40,6 +40,38 @@ class ScoringTests(unittest.TestCase):
 
         self.assertGreater(weather_score, normal_score)
 
+    def test_avoid_transfers_changes_subway_scores(self):
+        route = make_route(transfers=2)
+
+        normal_score = calculate_stress_score(route)
+        avoid_transfer_score = calculate_stress_score(route, avoid_transfers=True)
+
+        self.assertGreater(avoid_transfer_score, normal_score)
+
+    def test_late_night_mode_penalizes_walking_and_biking_more_than_subway(self):
+        subway = make_route(id="subway", mode=RouteMode.subway, late_night_walk_penalty=6)
+        walking = make_route(id="walking", mode=RouteMode.walking, late_night_walk_penalty=6)
+        bike = make_route(id="bike", mode=RouteMode.citi_bike, late_night_walk_penalty=6)
+
+        subway_delta = calculate_stress_score(subway, late_night_mode=True) - calculate_stress_score(subway)
+        walking_delta = calculate_stress_score(walking, late_night_mode=True) - calculate_stress_score(walking)
+        bike_delta = calculate_stress_score(bike, late_night_mode=True) - calculate_stress_score(bike)
+
+        self.assertGreater(walking_delta, subway_delta)
+        self.assertGreater(bike_delta, subway_delta)
+
+    def test_bad_weather_mode_penalizes_walking_and_biking_more_than_subway(self):
+        subway = make_route(id="subway", mode=RouteMode.subway, weather_penalty=6)
+        walking = make_route(id="walking", mode=RouteMode.walking, weather_penalty=6)
+        bike = make_route(id="bike", mode=RouteMode.citi_bike, weather_penalty=6)
+
+        subway_delta = calculate_stress_score(subway, bad_weather_mode=True) - calculate_stress_score(subway)
+        walking_delta = calculate_stress_score(walking, bad_weather_mode=True) - calculate_stress_score(walking)
+        bike_delta = calculate_stress_score(bike, bad_weather_mode=True) - calculate_stress_score(bike)
+
+        self.assertGreater(walking_delta, subway_delta)
+        self.assertGreater(bike_delta, subway_delta)
+
     def test_ranked_routes_select_expected_winners(self):
         fast_expensive = make_route(
             id="fast",

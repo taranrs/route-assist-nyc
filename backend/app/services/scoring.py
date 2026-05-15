@@ -18,6 +18,7 @@ class RouteOption:
     late_night_walk_penalty: int
     service_alert_penalty: int
     summary: str
+    distance_miles: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class ScoredRoute:
     cheapest_score: float
     stress_score: float
     safety_score: float
+    major_penalties: tuple[str, ...] = ()
 
 
 Selector = Callable[[ScoredRoute], float]
@@ -57,15 +59,17 @@ def calculate_stress_score(
     )
 
     if avoid_long_walks:
-        score += route.walking_minutes * 1.2
+        score += route.walking_minutes * 2.8
     if avoid_transfers:
-        score += route.transfers * 12
+        score += route.transfers * 22
     if bad_weather_mode:
-        score += route.weather_penalty * 2.2
+        weather_multiplier = 4.5 if route.mode in {RouteMode.walking, RouteMode.citi_bike} else 1.6
+        score += route.weather_penalty * weather_multiplier
     else:
         score += route.weather_penalty
     if late_night_mode:
-        score += route.late_night_walk_penalty * 2.5
+        late_night_multiplier = 5.0 if route.mode in {RouteMode.walking, RouteMode.citi_bike} else 1.8
+        score += route.late_night_walk_penalty * late_night_multiplier
     else:
         score += route.late_night_walk_penalty
 
@@ -85,8 +89,10 @@ def calculate_safety_score(
         + route.congestion_score * 2.5
         + route.service_alert_penalty * 2
     )
-    score += route.late_night_walk_penalty * (3.0 if late_night_mode else 1.2)
-    score += route.weather_penalty * (2.5 if bad_weather_mode else 1.0)
+    late_multiplier = 4.8 if late_night_mode and route.mode in {RouteMode.walking, RouteMode.citi_bike} else 2.0
+    weather_multiplier = 4.0 if bad_weather_mode and route.mode in {RouteMode.walking, RouteMode.citi_bike} else 1.2
+    score += route.late_night_walk_penalty * late_multiplier
+    score += route.weather_penalty * weather_multiplier
     return round(score, 1)
 
 
@@ -114,6 +120,15 @@ def score_route(
             route,
             late_night_mode=late_night_mode,
             bad_weather_mode=bad_weather_mode,
+        ),
+        major_penalties=tuple(
+            describe_major_penalties(
+                route,
+                avoid_long_walks=avoid_long_walks,
+                avoid_transfers=avoid_transfers,
+                late_night_mode=late_night_mode,
+                bad_weather_mode=bad_weather_mode,
+            )
         ),
     )
 
@@ -146,3 +161,29 @@ def select_ranked_routes(scored_routes: list[ScoredRoute]) -> dict[PreferenceMod
         preference: min(scored_routes, key=lambda route: (selector(route), route.option.id))
         for preference, selector in RANKING_SELECTORS.items()
     }
+
+
+def describe_major_penalties(
+    route: RouteOption,
+    *,
+    avoid_long_walks: bool = False,
+    avoid_transfers: bool = False,
+    late_night_mode: bool = False,
+    bad_weather_mode: bool = False,
+) -> list[str]:
+    penalties: list[str] = []
+
+    if avoid_long_walks and route.walking_minutes >= 12:
+        penalties.append("Avoid long walks increased this route's walking penalty.")
+    if avoid_transfers and route.transfers > 0:
+        penalties.append("Avoid transfers increased this route's transfer penalty.")
+    if late_night_mode and route.mode in {RouteMode.walking, RouteMode.citi_bike}:
+        penalties.append("Late-night mode increased exposure penalties for this mode.")
+    if bad_weather_mode and route.mode in {RouteMode.walking, RouteMode.citi_bike}:
+        penalties.append("Bad weather increased exposure penalties for this mode.")
+    if route.congestion_score >= 7:
+        penalties.append("High congestion increases modeled stress.")
+    if route.service_alert_penalty >= 3:
+        penalties.append("Service alert risk increases modeled stress.")
+
+    return penalties

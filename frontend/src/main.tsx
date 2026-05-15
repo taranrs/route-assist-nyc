@@ -21,6 +21,13 @@ const preferenceLabels: Record<PreferenceMode, string> = {
   safety_aware: "Safety-aware"
 };
 
+const recommendationSubheads: Record<string, string> = {
+  Fastest: "Recommended for speed",
+  Cheapest: "Recommended for cost",
+  "Least stressful": "Recommended for low stress",
+  "Safety-aware": "Recommended for safety-aware preferences"
+};
+
 const modeIcons: Record<RouteMode, React.ReactNode> = {
   subway: <TrainFront size={20} />,
   walking: <Footprints size={20} />,
@@ -165,15 +172,60 @@ function App() {
         {!loading && !error && !data && (
           <DashboardState title="Ready to compare" body="Enter a Manhattan origin and destination to see ranked route cards." />
         )}
-        {!loading && data?.supported && data.routeCards.length > 0 && (
-          <div className="grid gap-4 lg:grid-cols-4">
-            {data.routeCards.map((route) => (
-              <RouteCardView key={route.label} route={route} highlighted={route.label === preferenceLabels[data.requestedPreference]} />
-            ))}
+        {!loading && data?.supported && data.recommendations.length > 0 && (
+          <div className="space-y-8">
+            <PreferencesApplied preferences={data.appliedPreferences} />
+
+            <ResultSection title="Recommended picks">
+              <div className="grid gap-4 lg:grid-cols-4">
+                {data.recommendations.map((route) => (
+                  <RouteCardView
+                    key={route.label}
+                    route={route}
+                    highlighted={route.label === preferenceLabels[data.requestedPreference]}
+                    subtitle={recommendationSubheads[route.label]}
+                  />
+                ))}
+              </div>
+            </ResultSection>
+
+            <ResultSection title="All route options">
+              <div className="grid gap-4 lg:grid-cols-4">
+                {data.allOptions.map((route) => (
+                  <RouteCardView key={route.mode} route={route} highlighted={false} subtitle="Available demo mode" />
+                ))}
+              </div>
+            </ResultSection>
           </div>
         )}
       </section>
     </main>
+  );
+}
+
+function ResultSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h2 className="mb-3 text-xl font-semibold text-white">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function PreferencesApplied({ preferences }: { preferences: string[] }) {
+  if (preferences.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <p className="font-semibold text-zinc-100">Preferences applied</p>
+      <ul className="mt-2 grid gap-2 text-sm leading-6 text-zinc-300 md:grid-cols-2">
+        {preferences.map((preference) => (
+          <li key={preference}>{preference}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -243,12 +295,13 @@ function Toggle({ label, checked, onChange, icon }: { label: string; checked: bo
   );
 }
 
-function RouteCardView({ route, highlighted }: { route: RouteCard; highlighted: boolean }) {
+function RouteCardView({ route, highlighted, subtitle }: { route: RouteCard; highlighted: boolean; subtitle: string }) {
   return (
     <article className={`rounded-lg border p-5 ${highlighted ? "border-emerald-400 bg-emerald-950/30" : "border-zinc-800 bg-zinc-900"}`}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-emerald-300">{route.label}</p>
+          <p className="mt-1 text-xs text-zinc-400">{subtitle}</p>
           <h2 className="mt-1 flex items-center gap-2 text-xl font-semibold capitalize text-white">
             {modeIcons[route.mode]} {route.mode.replace("_", " ")}
           </h2>
@@ -260,11 +313,30 @@ function RouteCardView({ route, highlighted }: { route: RouteCard; highlighted: 
       </div>
 
       <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+        <Metric label="Base" value={route.baseEstimate} />
         <Metric label="Cost" value={`$${route.estimatedCost.toFixed(2)}`} />
         <Metric label="Transfers" value={String(route.transfers)} />
         <Metric label="Walking" value={`${route.walkingMinutes} min`} />
         <Metric label="Stress" value={String(route.stressScore)} />
       </dl>
+
+      {route.recommendationReason && <p className="mt-5 text-sm font-medium text-zinc-100">{route.recommendationReason}</p>}
+      {route.runnerUpMode && route.runnerUpReason && (
+        <p className="mt-2 text-sm leading-6 text-zinc-400">
+          Runner-up: {route.runnerUpMode.replace("_", " ")}. {route.runnerUpReason}
+        </p>
+      )}
+
+      {route.majorPenalties.length > 0 && (
+        <div className="mt-5 rounded-md border border-amber-800 bg-amber-950/30 p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-200">Major penalties</p>
+          <ul className="mt-2 space-y-1 text-sm leading-6 text-amber-100">
+            {route.majorPenalties.map((penalty) => (
+              <li key={penalty}>{penalty}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <ul className="mt-5 space-y-2 text-sm leading-6 text-zinc-300">
         {route.reasons.map((reason) => (

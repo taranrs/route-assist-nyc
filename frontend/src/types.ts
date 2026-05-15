@@ -22,12 +22,21 @@ export type RouteCard = {
   transfers: number;
   walkingMinutes: number;
   stressScore: number;
+  baseEstimate: string;
+  majorPenalties: string[];
   reasons: string[];
+  recommendationReason: string | null;
+  runnerUpMode: RouteMode | null;
+  runnerUpReason: string | null;
 };
 
 export type CompareRoutesResponse = {
   supported: boolean;
   scopeMessage: string | null;
   requestedPreference: PreferenceMode;
+  recommendations: RouteCard[];
+  allOptions: RouteCard[];
+  appliedPreferences: string[];
+  hiddenOptionsMessages: string[];
   routeCards: RouteCard[];
 };

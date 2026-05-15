@@ -23,11 +23,20 @@ class RouteCard(BaseModel):
     transfers: int
     walkingMinutes: int
     stressScore: float
+    baseEstimate: str
+    majorPenalties: list[str]
     reasons: list[str]
+    recommendationReason: str | None = None
+    runnerUpMode: RouteMode | None = None
+    runnerUpReason: str | None = None
 
 
 class CompareRoutesResponse(BaseModel):
     supported: bool
     scopeMessage: str | None = None
     requestedPreference: PreferenceMode
+    recommendations: list[RouteCard]
+    allOptions: list[RouteCard]
+    appliedPreferences: list[str]
+    hiddenOptionsMessages: list[str] = []
     routeCards: list[RouteCard]

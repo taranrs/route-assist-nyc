@@ -42,6 +42,8 @@ class RouteComparisonTests(unittest.TestCase):
         self.assertFalse(response.supported)
         self.assertEqual(response.scopeMessage, SUPPORTED_SCOPE_MESSAGE)
         self.assertEqual(response.routeCards, [])
+        self.assertEqual(response.recommendations, [])
+        self.assertEqual(response.allOptions, [])
 
     def test_lowercase_and_alias_inputs_match_mocked_route_pair(self):
         response = compare_routes(make_request(origin="time square", destination="wall st"))
@@ -55,15 +57,39 @@ class RouteComparisonTests(unittest.TestCase):
 
         self.assertTrue(response.supported)
         self.assertIsNone(response.scopeMessage)
-        self.assertEqual(len(response.routeCards), 4)
-        self.assertTrue(any("Mock" in reason for card in response.routeCards for reason in card.reasons))
+        self.assertEqual(len(response.recommendations), 4)
+        self.assertEqual(len(response.allOptions), 4)
+        self.assertTrue(any("Demo" in reason for card in response.allOptions for reason in card.reasons))
+
+    def test_generic_recognized_manhattan_routes_generate_all_four_modes(self):
+        response = compare_routes(make_request(origin="Bryant Park", destination="Tribeca"))
+
+        modes = {card.mode for card in response.allOptions}
+
+        self.assertEqual(modes, {RouteMode.subway, RouteMode.walking, RouteMode.citi_bike, RouteMode.rideshare})
+
+    def test_recommendations_and_all_options_both_exist(self):
+        response = compare_routes(make_request(origin="Empire State Building", destination="Battery Park"))
+
+        self.assertEqual(len(response.recommendations), 4)
+        self.assertGreaterEqual(len(response.allOptions), 3)
+        self.assertEqual(response.routeCards, response.recommendations)
 
     def test_max_rideshare_cost_filters_rideshare_options(self):
         response = compare_routes(make_request(max_rideshare_cost=10))
 
-        modes = {card.mode for card in response.routeCards}
+        modes = {card.mode for card in response.allOptions}
 
         self.assertNotIn(RouteMode.rideshare, modes)
+        self.assertTrue(response.hiddenOptionsMessages)
+        self.assertTrue(any("Rideshare hidden" in message for message in response.appliedPreferences))
+
+    def test_all_options_always_include_available_modes(self):
+        response = compare_routes(make_request(origin="Union Square", destination="Chelsea"))
+
+        modes = {card.mode for card in response.allOptions}
+
+        self.assertEqual(modes, {RouteMode.subway, RouteMode.walking, RouteMode.citi_bike, RouteMode.rideshare})
 
     def test_commuter_and_outer_borough_markers_stay_unsupported(self):
         for destination in ("Long Island", "New Jersey", "Queens", "Bronx", "Staten Island"):
