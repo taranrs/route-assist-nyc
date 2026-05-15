@@ -43,12 +43,35 @@ class RouteComparisonTests(unittest.TestCase):
         self.assertEqual(response.scopeMessage, SUPPORTED_SCOPE_MESSAGE)
         self.assertEqual(response.routeCards, [])
 
+    def test_lowercase_and_alias_inputs_match_mocked_route_pair(self):
+        response = compare_routes(make_request(origin="time square", destination="wall st"))
+
+        self.assertTrue(response.supported)
+        self.assertEqual(response.routeCards[0].label, "Fastest")
+        self.assertEqual(response.routeCards[0].mode, RouteMode.subway)
+
+    def test_unknown_manhattan_route_uses_generic_fallback(self):
+        response = compare_routes(make_request(origin="Empire State Building", destination="Battery Park"))
+
+        self.assertTrue(response.supported)
+        self.assertIsNone(response.scopeMessage)
+        self.assertEqual(len(response.routeCards), 4)
+        self.assertTrue(any("Mock" in reason for card in response.routeCards for reason in card.reasons))
+
     def test_max_rideshare_cost_filters_rideshare_options(self):
         response = compare_routes(make_request(max_rideshare_cost=10))
 
         modes = {card.mode for card in response.routeCards}
 
         self.assertNotIn(RouteMode.rideshare, modes)
+
+    def test_commuter_and_outer_borough_markers_stay_unsupported(self):
+        for destination in ("Long Island", "New Jersey", "Queens", "Bronx", "Staten Island"):
+            with self.subTest(destination=destination):
+                response = compare_routes(make_request(origin="Penn Station", destination=destination))
+
+                self.assertFalse(response.supported)
+                self.assertEqual(response.scopeMessage, SUPPORTED_SCOPE_MESSAGE)
 
 
 if __name__ == "__main__":

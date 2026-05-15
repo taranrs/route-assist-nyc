@@ -1,9 +1,12 @@
 from app.domain.enums import RouteMode
+from app.services.location_catalog import canonical_location_name
 from app.services.scoring import RouteOption
 
 
 def _key(origin: str, destination: str) -> tuple[str, str]:
-    return origin.strip().lower(), destination.strip().lower()
+    origin_name = canonical_location_name(origin) or origin
+    destination_name = canonical_location_name(destination) or destination
+    return origin_name.strip().lower(), destination_name.strip().lower()
 
 
 MOCK_ROUTE_LIBRARY: dict[tuple[str, str], list[RouteOption]] = {

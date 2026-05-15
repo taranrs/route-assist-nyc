@@ -1,25 +1,9 @@
+from app.services.location_catalog import resolve_demo_location
+
 SUPPORTED_SCOPE_MESSAGE = (
     "RouteAssist NYC currently supports Manhattan routes. "
     "Outer borough and commuter route support coming later."
 )
-
-MANHATTAN_PLACES = {
-    "penn station",
-    "washington square park",
-    "times square",
-    "wall street",
-    "grand central",
-    "columbia university",
-    "union square",
-    "chelsea",
-    "world trade center",
-    "harlem",
-    "central park",
-    "soho",
-    "flatiron",
-    "upper west side",
-    "upper east side",
-}
 
 OUT_OF_SCOPE_MARKERS = {
     "brooklyn",
@@ -45,4 +29,4 @@ def is_supported_manhattan_route(origin: str, destination: str) -> bool:
     if any(marker in combined for marker in OUT_OF_SCOPE_MARKERS):
         return False
 
-    return origin_key in MANHATTAN_PLACES and destination_key in MANHATTAN_PLACES
+    return resolve_demo_location(origin_key) is not None and resolve_demo_location(destination_key) is not None

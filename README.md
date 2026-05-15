@@ -6,7 +6,9 @@ It is not a Google Maps clone. The MVP focuses on ranking route choices by user 
 
 ## Current Scope
 
-Phase 1 and Phase 2 are implemented with mocked Manhattan route options only.
+Phase 1 and Phase 2 are implemented with mocked Manhattan route estimates only. Route times, costs, congestion, availability, weather penalties, and stress scores are demo values used to prove the route scoring engine and UI flow.
+
+Real-time Mapbox, MTA GTFS/GTFS-Realtime, Citi Bike GBFS, and weather APIs are planned later. Map pin selection will also come later through Mapbox; the current version uses typed demo locations and simple autocomplete suggestions.
 
 Supported example routes:
 
@@ -15,6 +17,29 @@ Supported example routes:
 - Grand Central to Columbia University
 - Union Square to Chelsea
 - World Trade Center to Times Square
+
+Current known Manhattan demo locations:
+
+- Penn Station
+- Times Square
+- Grand Central
+- Washington Square Park
+- Union Square
+- Chelsea
+- Chelsea Market
+- World Trade Center
+- Wall Street
+- Financial District
+- SoHo
+- Tribeca
+- Columbus Circle
+- Central Park South
+- Empire State Building
+- Columbia University
+- Bryant Park
+- Rockefeller Center
+- Flatiron Building
+- Battery Park
 
 Out-of-scope routes return:
 

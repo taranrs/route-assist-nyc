@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { Bike, Car, Footprints, TrainFront, Umbrella, Moon, ArrowRight } from "lucide-react";
 import { compareRoutesRequest } from "./api";
+import { findLocationSuggestions } from "./locations";
 import "./styles.css";
 import type { CompareRoutesRequest, CompareRoutesResponse, PreferenceMode, RouteCard, RouteMode } from "./types";
 
@@ -37,6 +38,7 @@ function App() {
   const [lateNightMode, setLateNightMode] = React.useState(false);
   const [badWeatherMode, setBadWeatherMode] = React.useState(false);
   const [maxRideshareCost, setMaxRideshareCost] = React.useState("35");
+  const [focusedLocationField, setFocusedLocationField] = React.useState<"origin" | "destination" | null>(null);
   const [data, setData] = React.useState<CompareRoutesResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -85,8 +87,22 @@ function App() {
 
           <form onSubmit={compareRoutes} className="rounded-lg border border-zinc-800 bg-zinc-950 p-5 shadow-2xl shadow-black/20">
             <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Origin" value={origin} onChange={setOrigin} />
-              <Field label="Destination" value={destination} onChange={setDestination} />
+              <LocationField
+                label="Origin"
+                value={origin}
+                focused={focusedLocationField === "origin"}
+                onFocus={() => setFocusedLocationField("origin")}
+                onBlur={() => setTimeout(() => setFocusedLocationField(null), 120)}
+                onChange={setOrigin}
+              />
+              <LocationField
+                label="Destination"
+                value={destination}
+                focused={focusedLocationField === "destination"}
+                onFocus={() => setFocusedLocationField("destination")}
+                onBlur={() => setTimeout(() => setFocusedLocationField(null), 120)}
+                onChange={setDestination}
+              />
               <label className="space-y-2">
                 <span className="text-sm text-zinc-300">Departure time</span>
                 <input className="control" type="time" value={departureTime} onChange={(event) => setDepartureTime(event.target.value)} />
@@ -137,6 +153,9 @@ function App() {
       </section>
 
       <section className="mx-auto max-w-7xl px-5 py-8">
+        <div className="mb-5 rounded-lg border border-sky-800 bg-sky-950/40 p-4 text-sm leading-6 text-sky-100">
+          <span className="font-semibold text-white">Demo mode:</span> route times, costs, congestion, and availability are mocked estimates. Real Mapbox, MTA, Citi Bike, and weather data will be added later.
+        </div>
         {error && <div className="rounded-lg border border-red-800 bg-red-950/50 p-4 text-red-100">{error}</div>}
         {data?.scopeMessage && <div className="rounded-lg border border-amber-700 bg-amber-950/50 p-4 text-amber-100">{data.scopeMessage}</div>}
         {loading && <DashboardState title="Comparing route options..." body="Scoring mocked Manhattan choices by time, cost, walking, transfers, weather, congestion, and stress." />}
@@ -167,11 +186,50 @@ function DashboardState({ title, body }: { title: string; body: string }) {
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function LocationField({
+  label,
+  value,
+  focused,
+  onFocus,
+  onBlur,
+  onChange
+}: {
+  label: string;
+  value: string;
+  focused: boolean;
+  onFocus: () => void;
+  onBlur: () => void;
+  onChange: (value: string) => void;
+}) {
+  const suggestions = findLocationSuggestions(value);
+
   return (
-    <label className="space-y-2">
+    <label className="relative space-y-2">
       <span className="text-sm text-zinc-300">{label}</span>
-      <input className="control" value={value} onChange={(event) => onChange(event.target.value)} />
+      <input
+        className="control"
+        value={value}
+        onBlur={onBlur}
+        onChange={(event) => onChange(event.target.value)}
+        onFocus={onFocus}
+      />
+      {focused && suggestions.length > 0 && (
+        <div className="absolute z-20 mt-2 max-h-56 w-full overflow-auto rounded-md border border-zinc-700 bg-zinc-950 shadow-xl shadow-black/30">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.displayName}
+              type="button"
+              className="block w-full px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                onChange(suggestion.displayName);
+              }}
+            >
+              {suggestion.displayName}
+            </button>
+          ))}
+        </div>
+      )}
     </label>
   );
 }
