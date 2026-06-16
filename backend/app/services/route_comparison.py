@@ -1,7 +1,13 @@
+from dataclasses import replace
+
 from app.domain.enums import PreferenceMode, RouteMode
-from app.models.routes import CompareRoutesRequest, CompareRoutesResponse, RouteCard
+from app.models.routes import CompareRoutesRequest, CompareRoutesResponse, ProviderStatus, RouteCard
+from app.providers import citibike_provider, mta_provider, weather_provider
+from app.providers.citibike_provider import CitiBikeStatus
 from app.providers.mock_routes import get_mock_route_options
-from app.services.location_catalog import canonical_location_name, normalize_location_query
+from app.providers.mta_provider import MTAAlertSummary
+from app.providers.weather_provider import WeatherStatus
+from app.services.location_catalog import canonical_location_name, normalize_location_query, resolve_demo_location
 from app.services.scope import SUPPORTED_SCOPE_MESSAGE, is_supported_manhattan_route
 from app.services.scoring import RANKING_SELECTORS, RouteOption, ScoredRoute, score_routes, select_ranked_routes
 
@@ -48,16 +54,36 @@ def compare_routes(request: CompareRoutesRequest) -> CompareRoutesResponse:
             routeCards=[],
         )
 
-    options, hidden_messages = _apply_request_filters(
-        get_mock_route_options(request.origin, request.destination), request
+    origin_loc = resolve_demo_location(request.origin)
+    dest_loc = resolve_demo_location(request.destination)
+
+    mta_alerts = mta_provider.get_subway_alerts()
+
+    citibike_status = CitiBikeStatus.unavailable()
+    if origin_loc and dest_loc:
+        citibike_status = citibike_provider.get_citibike_status(
+            origin_loc.latitude, origin_loc.longitude,
+            dest_loc.latitude, dest_loc.longitude,
+        )
+
+    weather = weather_provider.get_weather(
+        (origin_loc.latitude + dest_loc.latitude) / 2 if origin_loc and dest_loc else 40.7580,
+        (origin_loc.longitude + dest_loc.longitude) / 2 if origin_loc and dest_loc else -73.9855,
     )
+
+    raw_options = get_mock_route_options(request.origin, request.destination)
+    enriched_options = _apply_real_provider_data(raw_options, mta_alerts, citibike_status)
+
+    options, hidden_messages = _apply_request_filters(enriched_options, request)
+
+    effective_bad_weather = request.bad_weather_mode or weather.is_bad_weather
 
     scored = score_routes(
         options,
         avoid_long_walks=request.avoid_long_walks,
         avoid_transfers=request.avoid_transfers,
         late_night_mode=request.late_night_mode,
-        bad_weather_mode=request.bad_weather_mode,
+        bad_weather_mode=effective_bad_weather,
         max_rideshare_cost=request.max_rideshare_cost,
     )
     ranked = select_ranked_routes(scored)
@@ -82,6 +108,18 @@ def compare_routes(request: CompareRoutesRequest) -> CompareRoutesResponse:
         for scored_route in sorted(scored, key=lambda route: route.option.mode.value)
     ]
 
+    provider_status = ProviderStatus(
+        mta_alerts_live=mta_alerts.has_alerts,
+        mta_alert_count=mta_alerts.alert_count,
+        affected_subway_lines=sorted(mta_alerts.affected_route_ids),
+        citibike_live=citibike_status.found_origin or citibike_status.found_destination,
+        origin_bikes_available=citibike_status.origin_total_bikes if citibike_status.found_origin else None,
+        destination_docks_available=citibike_status.destination_docks_available if citibike_status.found_destination else None,
+        weather_live=weather.available,
+        weather_condition=weather.condition if weather.available else None,
+        effective_bad_weather=effective_bad_weather,
+    )
+
     return CompareRoutesResponse(
         supported=True,
         scopeMessage=None,
@@ -89,10 +127,47 @@ def compare_routes(request: CompareRoutesRequest) -> CompareRoutesResponse:
         requestedPreference=request.preference_mode,
         recommendations=cards,
         allOptions=all_options,
-        appliedPreferences=_build_applied_preferences(request, hidden_messages),
+        appliedPreferences=_build_applied_preferences(request, hidden_messages, weather),
         hiddenOptionsMessages=hidden_messages,
         routeCards=cards,
+        providerStatus=provider_status,
     )
+
+
+def _apply_real_provider_data(
+    options: list[RouteOption],
+    mta_alerts: MTAAlertSummary,
+    citibike_status: CitiBikeStatus,
+) -> list[RouteOption]:
+    result: list[RouteOption] = []
+    for option in options:
+        if option.mode == RouteMode.subway:
+            option = _apply_mta_alerts(option, mta_alerts)
+        elif option.mode == RouteMode.citi_bike:
+            option = _apply_citibike_availability(option, citibike_status)
+        result.append(option)
+    return result
+
+
+def _apply_mta_alerts(option: RouteOption, alerts: MTAAlertSummary) -> RouteOption:
+    if not alerts.has_alerts:
+        return option
+    if option.subway_lines and alerts.affected_route_ids.intersection(option.subway_lines):
+        return replace(option, service_alert_penalty=min(5, option.service_alert_penalty + 3))
+    if not option.subway_lines and alerts.has_alerts:
+        return replace(option, service_alert_penalty=min(5, option.service_alert_penalty + 1))
+    return option
+
+
+def _apply_citibike_availability(option: RouteOption, status: CitiBikeStatus) -> RouteOption:
+    if not status.found_origin:
+        return option
+    total_bikes = status.origin_total_bikes
+    if total_bikes == 0:
+        return replace(option, availability_penalty=min(5, option.availability_penalty + 4))
+    if total_bikes <= 2:
+        return replace(option, availability_penalty=min(5, option.availability_penalty + 2))
+    return option
 
 
 def _apply_request_filters(
@@ -294,6 +369,7 @@ def _base_estimate(route: RouteOption) -> str:
 def _build_applied_preferences(
     request: CompareRoutesRequest,
     hidden_messages: list[str],
+    weather: WeatherStatus | None = None,
 ) -> list[str]:
     applied: list[str] = []
     if request.avoid_long_walks:
@@ -304,6 +380,10 @@ def _build_applied_preferences(
         applied.append("Late-night mode increased walking and Citi Bike exposure penalties.")
     if request.bad_weather_mode:
         applied.append("Bad weather increased walking and Citi Bike exposure penalties.")
+    elif weather and weather.available and weather.is_bad_weather:
+        applied.append(
+            f"Bad weather detected ({weather.condition}, {weather.wind_speed_mph:.0f} mph wind) — weather exposure penalties applied automatically."
+        )
     if request.max_rideshare_cost is not None:
         applied.append(f"Max rideshare cost set to ${request.max_rideshare_cost:.0f}.")
     applied.extend(hidden_messages)

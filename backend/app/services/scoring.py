@@ -28,6 +28,8 @@ class RouteOption:
     station_complexity: str | None = None
     mode_tradeoff_summary: str = ""
     major_decision_factors: tuple[str, ...] = ()
+    subway_lines: tuple[str, ...] = ()
+    availability_penalty: int = 0
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,7 @@ def calculate_stress_score(
         + route.wait_time_minutes * 0.9
         + route.congestion_score * 4
         + route.service_alert_penalty * 1.5
+        + route.availability_penalty * 2.0
     )
 
     if avoid_long_walks:
@@ -100,6 +103,7 @@ def calculate_score_breakdown(
     wait_score = route.wait_time_minutes * 0.9
     congestion_score = route.congestion_score * 4
     service_alert_score = route.service_alert_penalty * 1.5
+    availability_score = route.availability_penalty * 2.0
 
     if bad_weather_mode:
         weather_multiplier = 4.5 if route.mode in {RouteMode.walking, RouteMode.citi_bike} else 1.6
@@ -122,6 +126,7 @@ def calculate_score_breakdown(
         + weather_score
         + late_night_score
         + service_alert_score
+        + availability_score
     )
 
     return {
@@ -136,6 +141,7 @@ def calculate_score_breakdown(
         "weatherScore": round(weather_score, 1),
         "lateNightScore": round(late_night_score, 1),
         "serviceAlertScore": round(service_alert_score, 1),
+        "availabilityScore": round(availability_score, 1),
         "finalStressScore": round(final_score, 1),
     }
 
@@ -288,5 +294,9 @@ def describe_major_penalties(
         penalties.append("High congestion increases modeled stress.")
     if route.service_alert_penalty >= 3:
         penalties.append("Service alert risk increases modeled stress.")
+    if route.availability_penalty >= 2 and route.mode == RouteMode.citi_bike:
+        penalties.append("Low Citi Bike availability detected near origin.")
+    if route.availability_penalty >= 4 and route.mode == RouteMode.citi_bike:
+        penalties.append("No bikes available — docking station may be empty.")
 
     return penalties

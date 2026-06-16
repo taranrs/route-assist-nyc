@@ -27,8 +27,21 @@ class ScoreBreakdown(BaseModel):
     weatherScore: float
     lateNightScore: float
     serviceAlertScore: float
+    availabilityScore: float = 0.0
     finalStressScore: float
     safetyAwareScore: float
+
+
+class ProviderStatus(BaseModel):
+    mta_alerts_live: bool = False
+    mta_alert_count: int = 0
+    affected_subway_lines: list[str] = []
+    citibike_live: bool = False
+    origin_bikes_available: int | None = None
+    destination_docks_available: int | None = None
+    weather_live: bool = False
+    weather_condition: str | None = None
+    effective_bad_weather: bool = False
 
 
 class RouteCard(BaseModel):
@@ -73,3 +86,4 @@ class CompareRoutesResponse(BaseModel):
     appliedPreferences: list[str]
     hiddenOptionsMessages: list[str] = []
     routeCards: list[RouteCard]
+    providerStatus: ProviderStatus = Field(default_factory=ProviderStatus)
