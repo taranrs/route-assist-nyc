@@ -72,6 +72,39 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(walking_delta, subway_delta)
         self.assertGreater(bike_delta, subway_delta)
 
+    def test_late_night_mode_increases_walking_and_biking_safety_aware_scores(self):
+        walking = make_route(mode=RouteMode.walking, walking_distance_miles=2.5, late_night_walk_penalty=6)
+        bike = make_route(mode=RouteMode.citi_bike, biking_distance_miles=2.5, late_night_walk_penalty=6)
+
+        normal = score_routes([walking, bike])
+        late = score_routes([walking, bike], late_night_mode=True)
+
+        self.assertGreater(late[0].safety_aware_score, normal[0].safety_aware_score)
+        self.assertGreater(late[1].safety_aware_score, normal[1].safety_aware_score)
+
+    def test_bad_weather_mode_increases_walking_and_biking_safety_aware_scores(self):
+        walking = make_route(mode=RouteMode.walking, walking_distance_miles=2.5, weather_penalty=6)
+        bike = make_route(mode=RouteMode.citi_bike, biking_distance_miles=2.5, weather_penalty=6)
+
+        normal = score_routes([walking, bike])
+        weather = score_routes([walking, bike], bad_weather_mode=True)
+
+        self.assertGreater(weather[0].safety_aware_score, normal[0].safety_aware_score)
+        self.assertGreater(weather[1].safety_aware_score, normal[1].safety_aware_score)
+
+    def test_recommendations_use_separate_scoring_profiles(self):
+        fast = make_route(id="fast", mode=RouteMode.rideshare, travel_time_minutes=8, estimated_cost=40, walking_minutes=2, walking_distance_miles=0.1)
+        cheap = make_route(id="cheap", mode=RouteMode.walking, travel_time_minutes=45, estimated_cost=0, walking_minutes=45, walking_distance_miles=2.5)
+        calm = make_route(id="calm", mode=RouteMode.subway, travel_time_minutes=20, estimated_cost=2.9, walking_minutes=3, walking_distance_miles=0.2, transfers=0, wait_time_minutes=1, congestion_score=0)
+        aware = make_route(id="aware", mode=RouteMode.rideshare, travel_time_minutes=16, estimated_cost=15, walking_minutes=1, walking_distance_miles=0.1, congestion_score=1)
+
+        ranked = select_ranked_routes(score_routes([fast, cheap, calm, aware], late_night_mode=True, max_rideshare_cost=20))
+
+        self.assertEqual(ranked[PreferenceMode.fastest].option.id, "fast")
+        self.assertEqual(ranked[PreferenceMode.cheapest].option.id, "cheap")
+        self.assertEqual(ranked[PreferenceMode.least_stressful].option.id, "calm")
+        self.assertEqual(ranked[PreferenceMode.safety_aware].option.id, "aware")
+
     def test_ranked_routes_select_expected_winners(self):
         fast_expensive = make_route(
             id="fast",
@@ -99,7 +132,7 @@ class ScoringTests(unittest.TestCase):
 
         ranked = select_ranked_routes(score_routes([faster_with_wait, steadier]))
 
-        self.assertEqual(ranked[PreferenceMode.fastest].option.id, "steady")
+        self.assertEqual(ranked[PreferenceMode.fastest].option.id, "short-wait-heavy")
 
     def test_cheapest_route_selection_uses_cost_and_transfer_penalty(self):
         free_with_many_transfers = make_route(id="free", estimated_cost=0, transfers=3)
@@ -107,7 +140,7 @@ class ScoringTests(unittest.TestCase):
 
         ranked = select_ranked_routes(score_routes([free_with_many_transfers, low_cost_direct]))
 
-        self.assertEqual(ranked[PreferenceMode.cheapest].option.id, "direct")
+        self.assertEqual(ranked[PreferenceMode.cheapest].option.id, "free")
 
     def test_safety_aware_route_selection_prioritizes_low_exposure(self):
         fast = make_route(
@@ -161,6 +194,49 @@ class ScoringTests(unittest.TestCase):
         late_night_score = calculate_stress_score(route, late_night_mode=True)
 
         self.assertGreater(late_night_score, normal_score)
+
+    def test_each_preference_changes_final_stress_score_in_expected_direction(self):
+        walking_route = make_route(mode=RouteMode.walking, walking_minutes=25, weather_penalty=5, late_night_walk_penalty=6)
+        subway_route = make_route(mode=RouteMode.subway, transfers=2)
+
+        self.assertGreater(
+            score_routes([walking_route], avoid_long_walks=True)[0].stress_score,
+            score_routes([walking_route])[0].stress_score,
+        )
+        self.assertGreater(
+            score_routes([subway_route], avoid_transfers=True)[0].stress_score,
+            score_routes([subway_route])[0].stress_score,
+        )
+        self.assertGreater(
+            score_routes([walking_route], late_night_mode=True)[0].stress_score,
+            score_routes([walking_route])[0].stress_score,
+        )
+        self.assertGreater(
+            score_routes([walking_route], bad_weather_mode=True)[0].stress_score,
+            score_routes([walking_route])[0].stress_score,
+        )
+
+    def test_major_penalty_labels_are_clear(self):
+        route = make_route(
+            mode=RouteMode.citi_bike,
+            walking_minutes=20,
+            transfers=1,
+            weather_penalty=5,
+            late_night_walk_penalty=5,
+        )
+
+        scored = score_routes(
+            [route],
+            avoid_long_walks=True,
+            avoid_transfers=True,
+            late_night_mode=True,
+            bad_weather_mode=True,
+        )[0]
+
+        self.assertIn("Long walking penalty applied", scored.major_penalties)
+        self.assertIn("Transfer penalty applied", scored.major_penalties)
+        self.assertIn("Late-night walking exposure penalty applied", scored.major_penalties)
+        self.assertIn("Bad weather biking/walking penalty applied", scored.major_penalties)
 
 
 if __name__ == "__main__":

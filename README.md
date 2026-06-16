@@ -8,7 +8,25 @@ It is not a Google Maps clone. The MVP focuses on ranking route choices by user 
 
 Phase 1 and Phase 2 are implemented with mocked Manhattan route estimates only. Route times, costs, congestion, availability, weather penalties, and stress scores are demo values used to prove the route scoring engine and UI flow.
 
-Real-time Mapbox, MTA GTFS/GTFS-Realtime, Citi Bike GBFS, and weather APIs are planned later. Map pin selection will also come later through Mapbox; the current version uses typed demo locations and simple autocomplete suggestions.
+Mocked estimates are distance-aware: the backend uses approximate coordinates from the demo location catalog and a haversine calculation to generate total distance, walking exposure, biking distance, driving distance, rough speed, time, and cost. Real Mapbox Directions, MTA GTFS/GTFS-Realtime, Citi Bike GBFS, and weather APIs are planned later. Map pin selection and selected-route map display will also come later through Mapbox; the current version uses typed demo locations and simple autocomplete suggestions.
+
+The API returns two result groups:
+
+- `recommendations`: category winners for fastest, cheapest, least stressful, and safety-aware routing.
+- `allOptions`: every available mocked mode so users can compare subway, walking, Citi Bike, and rideshare even when a mode does not win a category.
+
+Recommendations use separate scoring profiles:
+
+- Fastest: lowest estimated travel time.
+- Cheapest: lowest estimated cost.
+- Least stressful: lowest stress score.
+- Safety-aware: lowest safety-aware score, with heavier consideration of walking distance, walking minutes, late-night exposure, bad weather, transfers, wait time, route complexity, station complexity, and whether rideshare is under budget.
+
+The app says `safety-aware`, not `safest`, because the current MVP uses mocked estimates and does not evaluate real-world safety conditions. The intent is to reduce modeled walking exposure, late-night exposure, weather exposure, and transfer complexity where possible.
+
+Preference scoring is visible in the UI. Avoid-long-walks, avoid-transfers, late-night mode, bad-weather mode, and max rideshare cost can change route stress scores, safety-aware scores, add penalty labels, or hide rideshare when it is over budget.
+
+Each route card includes distance, walking exposure, cost, transfers, stress score, safety-aware score, decision factors, and a compact score breakdown with fastest, cost, stress, and safety-aware profile values. Clicking a route opens a selected route details panel, which is the placeholder interaction that will later drive Mapbox route display.
 
 Supported example routes:
 

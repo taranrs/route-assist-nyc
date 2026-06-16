@@ -1,3 +1,4 @@
+from dataclasses import replace
 from math import asin, cos, radians, sin, sqrt
 
 from app.domain.enums import RouteMode
@@ -50,9 +51,9 @@ def get_mock_route_options(origin: str, destination: str) -> list[RouteOption]:
     reverse_key = _key(destination, origin)
 
     if direct_key in MOCK_ROUTE_LIBRARY:
-        return MOCK_ROUTE_LIBRARY[direct_key]
+        return _with_distance_metadata(MOCK_ROUTE_LIBRARY[direct_key], origin, destination)
     if reverse_key in MOCK_ROUTE_LIBRARY:
-        return MOCK_ROUTE_LIBRARY[reverse_key]
+        return _with_distance_metadata(MOCK_ROUTE_LIBRARY[reverse_key], origin, destination)
 
     return generate_generic_manhattan_options(origin, destination)
 
@@ -73,6 +74,7 @@ def generate_generic_manhattan_options(origin: str, destination: str) -> list[Ro
         ),
     )
     complexity = _route_complexity(distance)
+    complexity_label = _complexity_label(distance)
     walking_time = round(distance * 20)
     bike_time = round(distance * 10 + 7)
     subway_wait = 4 + complexity
@@ -98,6 +100,15 @@ def generate_generic_manhattan_options(origin: str, destination: str) -> list[Ro
             subway_transfers,
             "Demo subway estimate using nearby Manhattan stations.",
             round(distance, 2),
+            round(min(distance * 0.18 + 0.15 + subway_transfers * 0.08, 1.2), 2),
+            0.0,
+            0.0,
+            round(subway_time / max(distance, 0.1), 1),
+            True,
+            complexity_label,
+            "LOW" if subway_transfers == 0 and subway_wait <= 5 else "MEDIUM" if subway_transfers <= 1 else "HIGH",
+            "Lower cost and weather protection, but station access, waits, and transfers can add complexity.",
+            ("Base fare", "Station access walk", "Wait time", "Transfer complexity"),
         ),
         RouteOption(
             "walk-generic",
@@ -113,6 +124,15 @@ def generate_generic_manhattan_options(origin: str, destination: str) -> list[Ro
             0,
             "Demo walking estimate based on approximate Manhattan distance.",
             round(distance, 2),
+            round(distance, 2),
+            0.0,
+            0.0,
+            round(60 / 20, 1),
+            True,
+            "LOW" if distance < 1.2 else "MEDIUM" if distance < 3.0 else "HIGH",
+            None,
+            "No fare or transfers, but all distance becomes walking exposure.",
+            ("No cost", "Full walking distance", "Weather exposure", "Late-night walking exposure"),
         ),
         RouteOption(
             "bike-generic",
@@ -128,6 +148,15 @@ def generate_generic_manhattan_options(origin: str, destination: str) -> list[Ro
             0,
             "Demo Citi Bike estimate with unlock, dock, and short walk time.",
             round(distance, 2),
+            0.25,
+            round(distance * 1.05, 2),
+            0.0,
+            round(60 / 10, 1),
+            True,
+            complexity_label,
+            None,
+            "Fast for medium distances, but weather, docks, and late-night biking exposure matter.",
+            ("Bike distance", "Dock access", "Weather exposure", "Late-night biking exposure"),
         ),
         RouteOption(
             "ride-generic",
@@ -143,8 +172,91 @@ def generate_generic_manhattan_options(origin: str, destination: str) -> list[Ro
             0,
             "Demo rideshare estimate with Manhattan congestion.",
             round(distance, 2),
+            0.1,
+            0.0,
+            round(distance * 1.15, 2),
+            round(distance / max(rideshare_time / 60, 0.1), 1),
+            True,
+            "LOW" if congestion <= 5 else "MEDIUM" if congestion <= 8 else "HIGH",
+            None,
+            "Lowest walking exposure, but higher cost and congestion variability.",
+            ("Low walking exposure", "Congestion delay", "Higher estimated cost"),
         ),
     ]
+
+
+def _with_distance_metadata(options: list[RouteOption], origin: str, destination: str) -> list[RouteOption]:
+    origin_location = resolve_demo_location(origin)
+    destination_location = resolve_demo_location(destination)
+    if origin_location is None or destination_location is None:
+        return options
+
+    distance = round(
+        max(
+            0.3,
+            _haversine_miles(
+                origin_location.latitude,
+                origin_location.longitude,
+                destination_location.latitude,
+                destination_location.longitude,
+            ),
+        ),
+        2,
+    )
+    enriched: list[RouteOption] = []
+    for option in options:
+        if option.mode == RouteMode.walking:
+            enriched.append(
+                replace(
+                    option,
+                    distance_miles=distance,
+                    walking_distance_miles=distance,
+                    average_speed_mph=round(distance / max(option.travel_time_minutes / 60, 0.1), 1),
+                    route_complexity="LOW" if distance < 1.5 else "MEDIUM" if distance < 4 else "HIGH",
+                    mode_tradeoff_summary="No fare or transfers, but all distance becomes walking exposure.",
+                    major_decision_factors=("No cost", "Full walking distance", "Weather exposure", "Late-night walking exposure"),
+                )
+            )
+        elif option.mode == RouteMode.citi_bike:
+            enriched.append(
+                replace(
+                    option,
+                    distance_miles=distance,
+                    walking_distance_miles=0.25,
+                    biking_distance_miles=round(distance * 1.05, 2),
+                    average_speed_mph=round(distance / max(option.travel_time_minutes / 60, 0.1), 1),
+                    route_complexity=_complexity_label(distance),
+                    mode_tradeoff_summary="Fast for medium distances, but weather, docks, and late-night biking exposure matter.",
+                    major_decision_factors=("Bike distance", "Dock access", "Weather exposure", "Late-night biking exposure"),
+                )
+            )
+        elif option.mode == RouteMode.rideshare:
+            enriched.append(
+                replace(
+                    option,
+                    distance_miles=distance,
+                    walking_distance_miles=0.1,
+                    driving_distance_miles=round(distance * 1.15, 2),
+                    average_speed_mph=round(distance / max(option.travel_time_minutes / 60, 0.1), 1),
+                    route_complexity="LOW" if option.congestion_score <= 5 else "MEDIUM" if option.congestion_score <= 8 else "HIGH",
+                    mode_tradeoff_summary="Lowest walking exposure, but higher cost and congestion variability.",
+                    major_decision_factors=("Low walking exposure", "Congestion delay", "Higher estimated cost"),
+                )
+            )
+        else:
+            enriched.append(
+                replace(
+                    option,
+                    distance_miles=distance,
+                    walking_distance_miles=round(min(distance * 0.18 + 0.15 + option.transfers * 0.08, 1.2), 2),
+                    average_speed_mph=round(distance / max(option.travel_time_minutes / 60, 0.1), 1),
+                    route_complexity=_complexity_label(distance),
+                    station_complexity="LOW" if option.transfers == 0 and option.wait_time_minutes <= 5 else "MEDIUM" if option.transfers <= 1 else "HIGH",
+                    mode_tradeoff_summary="Lower cost and weather protection, but station access, waits, and transfers can add complexity.",
+                    major_decision_factors=("Base fare", "Station access walk", "Wait time", "Transfer complexity"),
+                )
+            )
+    return enriched
 
 
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -163,3 +275,11 @@ def _route_complexity(distance_miles: float) -> int:
     if distance_miles < 4.0:
         return 2
     return 3
+
+
+def _complexity_label(distance_miles: float) -> str:
+    if distance_miles < 1.5:
+        return "LOW"
+    if distance_miles < 4.0:
+        return "MEDIUM"
+    return "HIGH"

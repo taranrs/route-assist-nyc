@@ -1,6 +1,7 @@
 from app.domain.enums import PreferenceMode, RouteMode
 from app.models.routes import CompareRoutesRequest, CompareRoutesResponse, RouteCard
 from app.providers.mock_routes import get_mock_route_options
+from app.services.location_catalog import canonical_location_name, normalize_location_query
 from app.services.scope import SUPPORTED_SCOPE_MESSAGE, is_supported_manhattan_route
 from app.services.scoring import RANKING_SELECTORS, RouteOption, ScoredRoute, score_routes, select_ranked_routes
 
@@ -20,10 +21,25 @@ RECOMMENDATION_REASONS = {
 
 
 def compare_routes(request: CompareRoutesRequest) -> CompareRoutesResponse:
+    validation_message = _validate_request(request)
+    if validation_message:
+        return CompareRoutesResponse(
+            supported=False,
+            scopeMessage=None,
+            validationMessage=validation_message,
+            requestedPreference=request.preference_mode,
+            recommendations=[],
+            allOptions=[],
+            appliedPreferences=[],
+            hiddenOptionsMessages=[],
+            routeCards=[],
+        )
+
     if not is_supported_manhattan_route(request.origin, request.destination):
         return CompareRoutesResponse(
             supported=False,
             scopeMessage=SUPPORTED_SCOPE_MESSAGE,
+            validationMessage=None,
             requestedPreference=request.preference_mode,
             recommendations=[],
             allOptions=[],
@@ -42,6 +58,7 @@ def compare_routes(request: CompareRoutesRequest) -> CompareRoutesResponse:
         avoid_transfers=request.avoid_transfers,
         late_night_mode=request.late_night_mode,
         bad_weather_mode=request.bad_weather_mode,
+        max_rideshare_cost=request.max_rideshare_cost,
     )
     ranked = select_ranked_routes(scored)
 
@@ -68,6 +85,7 @@ def compare_routes(request: CompareRoutesRequest) -> CompareRoutesResponse:
     return CompareRoutesResponse(
         supported=True,
         scopeMessage=None,
+        validationMessage=None,
         requestedPreference=request.preference_mode,
         recommendations=cards,
         allOptions=all_options,
@@ -92,7 +110,7 @@ def _apply_request_filters(
     hidden_messages = []
     if len(filtered) != len(options):
         hidden_messages.append(
-            f"Rideshare hidden because estimated cost exceeds your max rideshare cost of ${request.max_rideshare_cost:.0f}."
+            f"Rideshare over budget: hidden because estimated cost exceeds your max rideshare cost of ${request.max_rideshare_cost:.0f}."
         )
     return filtered, hidden_messages
 
@@ -106,15 +124,31 @@ def _to_recommendation_card(
     route = scored_route.option
     runner_up = _runner_up_for(preference, scored_route, scored_routes)
     return RouteCard(
+        routeId=f"{preference.value}-{route.id}",
         label=LABELS[preference],
         mode=route.mode,
         estimatedTime=route.travel_time_minutes,
         estimatedCost=route.estimated_cost,
         transfers=route.transfers,
         walkingMinutes=route.walking_minutes,
+        distanceMiles=round(route.distance_miles, 1),
+        walkingDistanceMiles=round(route.walking_distance_miles, 1),
+        bikingDistanceMiles=round(route.biking_distance_miles, 1) if route.biking_distance_miles else None,
+        drivingDistanceMiles=round(route.driving_distance_miles, 1) if route.driving_distance_miles else None,
+        averageSpeedMph=route.average_speed_mph,
+        demoEstimate=route.demo_estimate,
         stressScore=scored_route.stress_score,
+        fastestScore=scored_route.fastest_score,
+        cheapestScore=scored_route.cheapest_score,
+        safetyAwareScore=scored_route.safety_aware_score,
         baseEstimate=_base_estimate(route),
+        routeSummary=route.summary,
+        routeComplexity=route.route_complexity,
+        stationComplexity=route.station_complexity,
+        modeTradeoffSummary=route.mode_tradeoff_summary,
+        majorDecisionFactors=list(route.major_decision_factors),
         majorPenalties=list(scored_route.major_penalties),
+        scoreBreakdown=scored_route.score_breakdown,
         reasons=_build_reasons(preference, scored_route, request),
         recommendationReason=_recommendation_reason(preference, scored_route, runner_up),
         runnerUpMode=runner_up.option.mode if runner_up else None,
@@ -125,15 +159,31 @@ def _to_recommendation_card(
 def _to_option_card(scored_route: ScoredRoute, request: CompareRoutesRequest) -> RouteCard:
     route = scored_route.option
     return RouteCard(
+        routeId=f"option-{route.id}",
         label=route.mode.value.replace("_", " ").title(),
         mode=route.mode,
         estimatedTime=route.travel_time_minutes,
         estimatedCost=route.estimated_cost,
         transfers=route.transfers,
         walkingMinutes=route.walking_minutes,
+        distanceMiles=round(route.distance_miles, 1),
+        walkingDistanceMiles=round(route.walking_distance_miles, 1),
+        bikingDistanceMiles=round(route.biking_distance_miles, 1) if route.biking_distance_miles else None,
+        drivingDistanceMiles=round(route.driving_distance_miles, 1) if route.driving_distance_miles else None,
+        averageSpeedMph=route.average_speed_mph,
+        demoEstimate=route.demo_estimate,
         stressScore=scored_route.stress_score,
+        fastestScore=scored_route.fastest_score,
+        cheapestScore=scored_route.cheapest_score,
+        safetyAwareScore=scored_route.safety_aware_score,
         baseEstimate=_base_estimate(route),
+        routeSummary=route.summary,
+        routeComplexity=route.route_complexity,
+        stationComplexity=route.station_complexity,
+        modeTradeoffSummary=route.mode_tradeoff_summary,
+        majorDecisionFactors=list(route.major_decision_factors),
         majorPenalties=list(scored_route.major_penalties),
+        scoreBreakdown=scored_route.score_breakdown,
         reasons=_build_option_reasons(scored_route, request),
     )
 
@@ -153,7 +203,7 @@ def _build_reasons(
     if preference == PreferenceMode.least_stressful:
         reasons.append(f"Lowest combined stress score at {scored_route.stress_score}.")
     if preference == PreferenceMode.safety_aware:
-        reasons.append("Balances shorter walks, waits, transfers, weather, and late-night exposure.")
+        reasons.extend(_safety_aware_reasons(scored_route, request))
 
     if request.avoid_long_walks and route.walking_minutes <= 10:
         reasons.append("Keeps walking time short for the avoid-long-walks setting.")
@@ -164,6 +214,26 @@ def _build_reasons(
     if request.late_night_mode and route.late_night_walk_penalty <= 3:
         reasons.append("Reduces late-night walking exposure.")
 
+    return reasons
+
+
+def _safety_aware_reasons(
+    scored_route: ScoredRoute,
+    request: CompareRoutesRequest,
+) -> list[str]:
+    route = scored_route.option
+    reasons = ["Balances reduced walking exposure, waits, transfers, weather, and late-night exposure."]
+    if route.mode == RouteMode.rideshare:
+        reasons.append("Reduces late-night walking exposure compared with walking and Citi Bike.")
+        if request.max_rideshare_cost is None or route.estimated_cost <= request.max_rideshare_cost:
+            reasons.append("Stays under your max rideshare cost." if request.max_rideshare_cost is not None else "Minimizes walking exposure in this demo estimate.")
+    if route.mode == RouteMode.subway:
+        if route.transfers == 0 and route.walking_distance_miles <= 0.5:
+            reasons.append("Subway remains recommended because it is direct, short-walk, and lower cost.")
+        elif route.transfers == 0:
+            reasons.append("Avoids transfer complexity.")
+    if route.mode in {RouteMode.walking, RouteMode.citi_bike} and (request.late_night_mode or request.bad_weather_mode):
+        reasons.append("This mode still ranked well despite exposure penalties in the current settings.")
     return reasons
 
 
@@ -217,7 +287,7 @@ def _runner_up_reason(
 
 def _base_estimate(route: RouteOption) -> str:
     if route.distance_miles:
-        return f"{route.distance_miles:.1f} mi demo estimate"
+        return f"{route.distance_miles:.1f} mi distance-aware demo estimate"
     return "Static demo estimate"
 
 
@@ -238,3 +308,18 @@ def _build_applied_preferences(
         applied.append(f"Max rideshare cost set to ${request.max_rideshare_cost:.0f}.")
     applied.extend(hidden_messages)
     return applied
+
+
+def _validate_request(request: CompareRoutesRequest) -> str | None:
+    if not request.origin.strip() or not request.destination.strip():
+        return "Please enter both an origin and a destination."
+
+    origin_name = canonical_location_name(request.origin)
+    destination_name = canonical_location_name(request.destination)
+    if origin_name and destination_name and origin_name == destination_name:
+        return "Origin and destination are the same. Choose two different Manhattan locations."
+
+    if normalize_location_query(request.origin) == normalize_location_query(request.destination):
+        return "Origin and destination are the same. Choose two different Manhattan locations."
+
+    return None

@@ -22,10 +22,10 @@ const preferenceLabels: Record<PreferenceMode, string> = {
 };
 
 const recommendationSubheads: Record<string, string> = {
-  Fastest: "Recommended for speed",
-  Cheapest: "Recommended for cost",
-  "Least stressful": "Recommended for low stress",
-  "Safety-aware": "Recommended for safety-aware preferences"
+  Fastest: "Best for speed",
+  Cheapest: "Best for cost",
+  "Least stressful": "Best for low stress",
+  "Safety-aware": "Best for safety-aware preference"
 };
 
 const modeIcons: Record<RouteMode, React.ReactNode> = {
@@ -47,13 +47,23 @@ function App() {
   const [maxRideshareCost, setMaxRideshareCost] = React.useState("35");
   const [focusedLocationField, setFocusedLocationField] = React.useState<"origin" | "destination" | null>(null);
   const [data, setData] = React.useState<CompareRoutesResponse | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
 
   async function compareRoutes(event?: React.FormEvent) {
     event?.preventDefault();
-    setLoading(true);
     setError("");
+
+    const validationMessage = validateForm(origin, destination);
+    if (validationMessage) {
+      setData(null);
+      setSelectedRouteId(null);
+      setError(validationMessage);
+      return;
+    }
+
+    setLoading(true);
 
     try {
       const payload: CompareRoutesRequest = {
@@ -68,7 +78,9 @@ function App() {
         max_rideshare_cost: maxRideshareCost ? Number(maxRideshareCost) : null
       };
 
-      setData(await compareRoutesRequest(payload));
+      const response = await compareRoutesRequest(payload);
+      setData(response);
+      setSelectedRouteId(response.recommendations[0]?.routeId ?? response.allOptions[0]?.routeId ?? null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong.");
     } finally {
@@ -79,6 +91,13 @@ function App() {
   React.useEffect(() => {
     void compareRoutes();
   }, []);
+
+  const selectedRoute = React.useMemo(() => {
+    if (!data || !selectedRouteId) {
+      return null;
+    }
+    return [...data.recommendations, ...data.allOptions].find((route) => route.routeId === selectedRouteId) ?? null;
+  }, [data, selectedRouteId]);
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -164,6 +183,7 @@ function App() {
           <span className="font-semibold text-white">Demo mode:</span> route times, costs, congestion, and availability are mocked estimates. Real Mapbox, MTA, Citi Bike, and weather data will be added later.
         </div>
         {error && <div className="rounded-lg border border-red-800 bg-red-950/50 p-4 text-red-100">{error}</div>}
+        {data?.validationMessage && <div className="rounded-lg border border-amber-700 bg-amber-950/50 p-4 text-amber-100">{data.validationMessage}</div>}
         {data?.scopeMessage && <div className="rounded-lg border border-amber-700 bg-amber-950/50 p-4 text-amber-100">{data.scopeMessage}</div>}
         {loading && <DashboardState title="Comparing route options..." body="Scoring mocked Manhattan choices by time, cost, walking, transfers, weather, congestion, and stress." />}
         {!loading && !error && data?.supported && data.routeCards.length === 0 && (
@@ -175,24 +195,41 @@ function App() {
         {!loading && data?.supported && data.recommendations.length > 0 && (
           <div className="space-y-8">
             <PreferencesApplied preferences={data.appliedPreferences} />
+            {selectedRoute && <SelectedRoutePanel route={selectedRoute} />}
 
-            <ResultSection title="Recommended picks">
-              <div className="grid gap-4 lg:grid-cols-4">
+            <ResultSection title="Recommended picks" subtitle="Category winners based on the current preference settings.">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {data.recommendations.map((route) => (
                   <RouteCardView
                     key={route.label}
                     route={route}
                     highlighted={route.label === preferenceLabels[data.requestedPreference]}
+                    selected={route.routeId === selectedRouteId}
+                    onSelect={() => setSelectedRouteId(route.routeId)}
                     subtitle={recommendationSubheads[route.label]}
                   />
                 ))}
               </div>
             </ResultSection>
 
-            <ResultSection title="All route options">
-              <div className="grid gap-4 lg:grid-cols-4">
+            <ResultSection title="All route options" subtitle="Every available mocked mode for this Manhattan demo route.">
+              {data.hiddenOptionsMessages.length > 0 && (
+                <div className="mb-4 rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-sm text-amber-100">
+                  {data.hiddenOptionsMessages.map((message) => (
+                    <p key={message}>{message}</p>
+                  ))}
+                </div>
+              )}
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {data.allOptions.map((route) => (
-                  <RouteCardView key={route.mode} route={route} highlighted={false} subtitle="Available demo mode" />
+                  <RouteCardView
+                    key={route.mode}
+                    route={route}
+                    highlighted={false}
+                    selected={route.routeId === selectedRouteId}
+                    onSelect={() => setSelectedRouteId(route.routeId)}
+                    subtitle="Available demo mode"
+                  />
                 ))}
               </div>
             </ResultSection>
@@ -203,10 +240,23 @@ function App() {
   );
 }
 
-function ResultSection({ title, children }: { title: string; children: React.ReactNode }) {
+function validateForm(origin: string, destination: string): string | null {
+  if (!origin.trim() || !destination.trim()) {
+    return "Please enter both an origin and a destination.";
+  }
+  if (origin.trim().toLowerCase() === destination.trim().toLowerCase()) {
+    return "Origin and destination are the same. Choose two different Manhattan locations.";
+  }
+  return null;
+}
+
+function ResultSection({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
     <section>
-      <h2 className="mb-3 text-xl font-semibold text-white">{title}</h2>
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold text-white">{title}</h2>
+        <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>
+      </div>
       {children}
     </section>
   );
@@ -226,6 +276,51 @@ function PreferencesApplied({ preferences }: { preferences: string[] }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+function SelectedRoutePanel({ route }: { route: RouteCard }) {
+  return (
+    <section className="rounded-lg border border-emerald-700 bg-emerald-950/20 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold text-emerald-300">Selected route details</p>
+          <h2 className="mt-1 flex items-center gap-2 text-2xl font-semibold capitalize text-white">
+            {modeIcons[route.mode]} {route.mode.replace("_", " ")}
+          </h2>
+          <p className="mt-2 text-sm text-zinc-300">{route.baseEstimate}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+          <Metric label="Distance" value={`${route.distanceMiles.toFixed(1)} mi`} />
+          <Metric label="Estimate" value={`${route.estimatedTime} min`} />
+          <Metric label="Cost" value={`$${route.estimatedCost.toFixed(2)}`} />
+          <Metric label="Walking" value={`${route.walkingDistanceMiles.toFixed(1)} mi`} />
+          <Metric label="Transfers" value={String(route.transfers)} />
+          <Metric label="Stress" value={String(route.stressScore)} />
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1.1fr]">
+        <div>
+          <div className="mb-5 rounded-md border border-zinc-800 bg-zinc-950/70 p-3 text-sm leading-6 text-zinc-300">
+            <p className="font-semibold text-zinc-100">Route summary</p>
+            <p className="mt-2">{route.routeSummary}</p>
+            <p className="mt-2">{route.modeTradeoffSummary}</p>
+            <p className="mt-2">
+              Complexity: {route.routeComplexity}
+              {route.stationComplexity ? `, station complexity: ${route.stationComplexity}` : ""}
+            </p>
+          </div>
+          <p className="text-sm font-semibold text-zinc-100">Reasons</p>
+          <ul className="mt-2 space-y-2 text-sm leading-6 text-zinc-300">
+            {route.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+        <ScoreDetails route={route} />
+      </div>
+    </section>
   );
 }
 
@@ -295,9 +390,32 @@ function Toggle({ label, checked, onChange, icon }: { label: string; checked: bo
   );
 }
 
-function RouteCardView({ route, highlighted, subtitle }: { route: RouteCard; highlighted: boolean; subtitle: string }) {
+function RouteCardView({
+  route,
+  highlighted,
+  selected,
+  onSelect,
+  subtitle
+}: {
+  route: RouteCard;
+  highlighted: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  subtitle: string;
+}) {
   return (
-    <article className={`rounded-lg border p-5 ${highlighted ? "border-emerald-400 bg-emerald-950/30" : "border-zinc-800 bg-zinc-900"}`}>
+    <article
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      className={`h-full cursor-pointer rounded-lg border p-5 text-left transition hover:border-emerald-500 ${selected ? "border-emerald-300 bg-emerald-950/40" : highlighted ? "border-emerald-500 bg-emerald-950/20" : "border-zinc-800 bg-zinc-900"}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-emerald-300">{route.label}</p>
@@ -313,12 +431,24 @@ function RouteCardView({ route, highlighted, subtitle }: { route: RouteCard; hig
       </div>
 
       <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-        <Metric label="Base" value={route.baseEstimate} />
+        <Metric label="Distance" value={`${route.distanceMiles.toFixed(1)} mi`} />
+        <Metric label="Walk exposure" value={`${route.walkingDistanceMiles.toFixed(1)} mi`} />
         <Metric label="Cost" value={`$${route.estimatedCost.toFixed(2)}`} />
         <Metric label="Transfers" value={String(route.transfers)} />
-        <Metric label="Walking" value={`${route.walkingMinutes} min`} />
         <Metric label="Stress" value={String(route.stressScore)} />
+        <Metric label="Safety-aware" value={String(route.safetyAwareScore)} />
       </dl>
+
+      {route.majorDecisionFactors.length > 0 && (
+        <div className="mt-5 rounded-md border border-zinc-800 bg-zinc-950/60 p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-400">Major decision factors</p>
+          <ul className="mt-2 space-y-1 text-sm leading-6 text-zinc-300">
+            {route.majorDecisionFactors.map((factor) => (
+              <li key={factor}>{factor}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {route.recommendationReason && <p className="mt-5 text-sm font-medium text-zinc-100">{route.recommendationReason}</p>}
       {route.runnerUpMode && route.runnerUpReason && (
@@ -338,6 +468,8 @@ function RouteCardView({ route, highlighted, subtitle }: { route: RouteCard; hig
         </div>
       )}
 
+      <ScoreDetails route={route} compact />
+
       <ul className="mt-5 space-y-2 text-sm leading-6 text-zinc-300">
         {route.reasons.map((reason) => (
           <li key={reason}>{reason}</li>
@@ -347,11 +479,43 @@ function RouteCardView({ route, highlighted, subtitle }: { route: RouteCard; hig
   );
 }
 
+function ScoreDetails({ route, compact = false }: { route: RouteCard; compact?: boolean }) {
+  const breakdown: Array<[string, number]> = [
+    ["Fastest profile", route.scoreBreakdown.fastestScore],
+    ["Cost profile", route.scoreBreakdown.cheapestScore],
+    ["Safety-aware", route.scoreBreakdown.safetyAwareScore],
+    ["Time", route.scoreBreakdown.timeScore],
+    ["Cost", route.scoreBreakdown.costScore],
+    ["Walking", route.scoreBreakdown.walkingScore],
+    ["Transfers", route.scoreBreakdown.transferScore],
+    ["Wait", route.scoreBreakdown.waitScore],
+    ["Congestion", route.scoreBreakdown.congestionScore],
+    ["Weather", route.scoreBreakdown.weatherScore],
+    ["Late night", route.scoreBreakdown.lateNightScore],
+    ["Alerts", route.scoreBreakdown.serviceAlertScore],
+    ["Final stress", route.scoreBreakdown.finalStressScore]
+  ];
+
+  return (
+    <details className={`${compact ? "mt-5" : ""} rounded-md border border-zinc-800 bg-zinc-950/70 p-3`} open={!compact}>
+      <summary className="cursor-pointer text-sm font-semibold text-zinc-100">Score details</summary>
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+        {breakdown.map(([label, value]) => (
+          <div key={label} className="rounded border border-zinc-800 bg-zinc-900 p-2">
+            <dt className="text-zinc-500">{label}</dt>
+            <dd className="mt-1 font-semibold text-zinc-100">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+    <div className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3">
       <dt className="text-xs text-zinc-500">{label}</dt>
-      <dd className="mt-1 font-semibold text-zinc-100">{value}</dd>
+      <dd className="mt-1 break-words font-semibold text-zinc-100">{value}</dd>
     </div>
   );
 }

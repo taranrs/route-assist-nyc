@@ -45,6 +45,22 @@ class RouteComparisonTests(unittest.TestCase):
         self.assertEqual(response.recommendations, [])
         self.assertEqual(response.allOptions, [])
 
+    def test_blank_origin_or_destination_returns_validation_message(self):
+        response = compare_routes(make_request(origin=" ", destination="Chelsea"))
+
+        self.assertFalse(response.supported)
+        self.assertEqual(response.validationMessage, "Please enter both an origin and a destination.")
+        self.assertEqual(response.recommendations, [])
+
+    def test_same_origin_destination_returns_validation_message(self):
+        response = compare_routes(make_request(origin="time square", destination="Times Square"))
+
+        self.assertFalse(response.supported)
+        self.assertEqual(
+            response.validationMessage,
+            "Origin and destination are the same. Choose two different Manhattan locations.",
+        )
+
     def test_lowercase_and_alias_inputs_match_mocked_route_pair(self):
         response = compare_routes(make_request(origin="time square", destination="wall st"))
 
@@ -82,7 +98,7 @@ class RouteComparisonTests(unittest.TestCase):
 
         self.assertNotIn(RouteMode.rideshare, modes)
         self.assertTrue(response.hiddenOptionsMessages)
-        self.assertTrue(any("Rideshare hidden" in message for message in response.appliedPreferences))
+        self.assertTrue(any("Rideshare over budget" in message for message in response.appliedPreferences))
 
     def test_all_options_always_include_available_modes(self):
         response = compare_routes(make_request(origin="Union Square", destination="Chelsea"))
@@ -90,6 +106,88 @@ class RouteComparisonTests(unittest.TestCase):
         modes = {card.mode for card in response.allOptions}
 
         self.assertEqual(modes, {RouteMode.subway, RouteMode.walking, RouteMode.citi_bike, RouteMode.rideshare})
+
+    def test_score_breakdown_fields_are_returned_for_options(self):
+        response = compare_routes(make_request(origin="Bryant Park", destination="Tribeca"))
+        option = response.allOptions[0]
+
+        self.assertGreater(option.scoreBreakdown.timeScore, 0)
+        self.assertGreaterEqual(option.scoreBreakdown.costScore, 0)
+        self.assertGreaterEqual(option.scoreBreakdown.walkingScore, 0)
+        self.assertGreaterEqual(option.scoreBreakdown.transferScore, 0)
+        self.assertGreaterEqual(option.scoreBreakdown.waitScore, 0)
+        self.assertGreaterEqual(option.scoreBreakdown.congestionScore, 0)
+        self.assertGreaterEqual(option.scoreBreakdown.weatherScore, 0)
+        self.assertGreaterEqual(option.scoreBreakdown.lateNightScore, 0)
+        self.assertEqual(option.scoreBreakdown.finalStressScore, option.stressScore)
+
+    def test_distance_fields_exist_on_every_route_option(self):
+        response = compare_routes(make_request(origin="Bryant Park", destination="Tribeca"))
+
+        for option in response.allOptions:
+            with self.subTest(mode=option.mode):
+                self.assertGreater(option.distanceMiles, 0)
+                self.assertGreaterEqual(option.walkingDistanceMiles, 0)
+                self.assertTrue(option.demoEstimate)
+
+    def test_longer_routes_produce_longer_walking_and_rideshare_estimates(self):
+        short_response = compare_routes(make_request(origin="Bryant Park", destination="Times Square"))
+        long_response = compare_routes(make_request(origin="Battery Park", destination="Columbia University"))
+
+        short_walk = next(option for option in short_response.allOptions if option.mode == RouteMode.walking)
+        long_walk = next(option for option in long_response.allOptions if option.mode == RouteMode.walking)
+        short_ride = next(option for option in short_response.allOptions if option.mode == RouteMode.rideshare)
+        long_ride = next(option for option in long_response.allOptions if option.mode == RouteMode.rideshare)
+
+        self.assertGreater(long_walk.distanceMiles, short_walk.distanceMiles)
+        self.assertGreater(long_walk.estimatedTime, short_walk.estimatedTime)
+        self.assertGreater(long_ride.estimatedTime, short_ride.estimatedTime)
+        self.assertGreater(long_ride.estimatedCost, short_ride.estimatedCost)
+
+    def test_rideshare_can_win_safety_aware_at_night_when_under_budget(self):
+        response = compare_routes(
+            make_request(
+                origin="Battery Park",
+                destination="Columbia University",
+                preference_mode=PreferenceMode.safety_aware,
+                late_night_mode=True,
+                bad_weather_mode=True,
+                max_rideshare_cost=80,
+            )
+        )
+
+        self.assertEqual(response.recommendations[0].label, "Safety-aware")
+        self.assertEqual(response.recommendations[0].mode, RouteMode.rideshare)
+
+    def test_rideshare_does_not_win_safety_aware_when_over_budget(self):
+        response = compare_routes(
+            make_request(
+                origin="Battery Park",
+                destination="Columbia University",
+                preference_mode=PreferenceMode.safety_aware,
+                late_night_mode=True,
+                bad_weather_mode=True,
+                max_rideshare_cost=20,
+            )
+        )
+
+        self.assertNotEqual(response.recommendations[0].mode, RouteMode.rideshare)
+        self.assertNotIn(RouteMode.rideshare, {option.mode for option in response.allOptions})
+
+    def test_subway_can_win_safety_aware_when_direct_low_walk_and_low_transfer(self):
+        response = compare_routes(
+            make_request(
+                origin="World Trade Center",
+                destination="Times Square",
+                preference_mode=PreferenceMode.safety_aware,
+                late_night_mode=True,
+                bad_weather_mode=True,
+                max_rideshare_cost=30,
+            )
+        )
+
+        self.assertEqual(response.recommendations[0].mode, RouteMode.subway)
+        self.assertEqual(response.recommendations[0].transfers, 0)
 
     def test_commuter_and_outer_borough_markers_stay_unsupported(self):
         for destination in ("Long Island", "New Jersey", "Queens", "Bronx", "Staten Island"):

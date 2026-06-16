@@ -2,6 +2,22 @@ export type PreferenceMode = "fastest" | "cheapest" | "least_stressful" | "safet
 
 export type RouteMode = "subway" | "walking" | "citi_bike" | "rideshare";
 
+export type ScoreBreakdown = {
+  fastestScore: number;
+  cheapestScore: number;
+  timeScore: number;
+  costScore: number;
+  walkingScore: number;
+  transferScore: number;
+  waitScore: number;
+  congestionScore: number;
+  weatherScore: number;
+  lateNightScore: number;
+  serviceAlertScore: number;
+  finalStressScore: number;
+  safetyAwareScore: number;
+};
+
 export type CompareRoutesRequest = {
   origin: string;
   destination: string;
@@ -15,15 +31,31 @@ export type CompareRoutesRequest = {
 };
 
 export type RouteCard = {
+  routeId: string;
   label: string;
   mode: RouteMode;
   estimatedTime: number;
   estimatedCost: number;
   transfers: number;
   walkingMinutes: number;
+  distanceMiles: number;
+  walkingDistanceMiles: number;
+  bikingDistanceMiles: number | null;
+  drivingDistanceMiles: number | null;
+  averageSpeedMph: number;
+  demoEstimate: boolean;
   stressScore: number;
+  fastestScore: number;
+  cheapestScore: number;
+  safetyAwareScore: number;
   baseEstimate: string;
+  routeSummary: string;
+  routeComplexity: string;
+  stationComplexity: string | null;
+  modeTradeoffSummary: string;
+  majorDecisionFactors: string[];
   majorPenalties: string[];
+  scoreBreakdown: ScoreBreakdown;
   reasons: string[];
   recommendationReason: string | null;
   runnerUpMode: RouteMode | null;
@@ -33,6 +65,7 @@ export type RouteCard = {
 export type CompareRoutesResponse = {
   supported: boolean;
   scopeMessage: string | null;
+  validationMessage: string | null;
   requestedPreference: PreferenceMode;
   recommendations: RouteCard[];
   allOptions: RouteCard[];
